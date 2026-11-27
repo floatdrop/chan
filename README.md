@@ -13,7 +13,7 @@ Generic channel utilities for Go 1.27+, with no dependencies.
 | [`ring`](https://pkg.go.dev/github.com/floatdrop/chan/ring) | A bounded channel that drops the oldest value instead of blocking the sender. |
 | [`demux`](https://pkg.go.dev/github.com/floatdrop/chan/demux) | Fans values out by key, to fixed channels or to a consumer started per key. |
 
-They replace [batchan](https://github.com/floatdrop/batchan), [ringchan](https://github.com/floatdrop/ringchan) and [demux](https://github.com/floatdrop/demux); see [Migrating](#migrating).
+They replace [batchan](https://github.com/floatdrop/batchan), [ringchan](https://github.com/floatdrop/ringchan) and [demux](https://github.com/floatdrop/demux).
 
 ```bash
 go get github.com/floatdrop/chan@latest
@@ -82,33 +82,6 @@ err := demux.Dynamic(ctx, in, func(o Order) string { return o.CustomerID },
 	demux.WithBuffer(16),
 )
 ```
-
-## Migrating
-
-| Before | Now |
-|---|---|
-| `batchan.New(in, n, batchan.WithContext(ctx))` | `batch.New(ctx, in, n)` |
-| `batchan.NewWithSplit(in, n, split)` | `batch.NewFunc(ctx, in, n, split)` |
-| `batchan.WithTimeout(d)` | `batch.WithTimeout(d)` |
-| `batchan.WithOutputBufferSize(n)` (default 1) | `batch.WithBuffer(n)` (default 0) |
-| `ringchan.New(in, n)` with `.C` and `.Dropped` | `ring.From(ctx, in, n)` with `.C` and `.Dropped()`, or `ring.New[T](n)` with `.Send` |
-| `demux.Static(in, key, outs)` | `demux.Static(ctx, in, key, outs)`, which returns an error |
-| `demux.Dynamic(in, key, consume, opts...)` | `demux.Dynamic(ctx, in, key, consume, opts...)`, which returns an error |
-| `demux.WithMaxChannels(n)` | `demux.WithMaxKeys(n)` |
-| `demux.WithBufferSize(n)` | `demux.WithBuffer(n)` |
-
-Behavior that changed:
-
-- **batch**
-  - The timeout used to restart after every flush and fire even when nothing was pending. Now it starts at a batch's first value, so it bounds how long any value waits.
-  - Canceling the context used to try a final flush. With nobody receiving, that flush blocked forever and leaked the goroutine. Now the unfinished batch is discarded.
-  - A batch's capacity now follows the length of the previous batch. Batches cut short by a timeout or split no longer reserve the full size.
-- **ring**
-  - `Dropped` was a plain field written by a background goroutine (a data race), and it could count drops that never happened. `Dropped()` is now atomic and exact.
-  - `ring.New` no longer needs a goroutine: `Send` works directly on the buffer.
-- **demux**
-  - When `WithMaxKeys` closes a key and that key comes back, the new consumer waits for the old one to return. Before, they ran at the same time and could process that key's values out of order.
-  - `Static` no longer panics when several keys share a channel.
 
 ## Benchmarks
 
