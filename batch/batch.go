@@ -24,6 +24,8 @@ type config struct {
 // WithTimeout bounds how long a batch can stay unfinished: once d has passed
 // since its first value arrived, the batch is sent even if it is not full.
 // Without this option, a batch waits until it is full or the input is closed.
+// To batch by time alone, pass math.MaxInt as the size.
+//
 // WithTimeout panics if d is not positive.
 func WithTimeout(d time.Duration) Option {
 	if d <= 0 {
@@ -77,12 +79,18 @@ func start[T any](ctx context.Context, in <-chan T, size int, split func(prev, n
 	return out
 }
 
+// burst is how many waiting values run takes with non-blocking receives
+// before it selects again, which is when it checks the timeout.
+const burst = 64
+
 func run[T any](ctx context.Context, in <-chan T, out chan<- []T, size int, split func(prev, next T) bool, timeout time.Duration) {
 	defer close(out)
 
 	var (
-		batch   []T
-		capHint = size // capacity of the next batch: the length of the last one sent
+		batch []T
+		// capHint is the capacity of the next batch: the length of the last
+		// one sent. The first batch starts small, since size may be huge.
+		capHint = min(size, 64)
 		timer   *time.Timer
 		expired <-chan time.Time // timer.C while a timeout is armed, nil otherwise
 	)
@@ -134,7 +142,7 @@ func run[T any](ctx context.Context, in <-chan T, out chan<- []T, size int, spli
 		case v, ok := <-in:
 			// Take the values that are already waiting with non-blocking
 			// receives, which cost a fraction of this select. ctx is checked
-			// after every value, the timeout at least every size values.
+			// after every value, the timeout at least every burst values.
 			for n := 1; ; n++ {
 				if !ok {
 					send()
@@ -143,7 +151,7 @@ func run[T any](ctx context.Context, in <-chan T, out chan<- []T, size int, spli
 				if !add(v) || ctx.Err() != nil {
 					return
 				}
-				if n == size {
+				if n == burst {
 					break
 				}
 				select {

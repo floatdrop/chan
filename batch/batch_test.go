@@ -2,6 +2,7 @@ package batch_test
 
 import (
 	"context"
+	"math"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -110,6 +111,37 @@ func TestTimeoutNeverSendsEmptyBatches(t *testing.T) {
 			t.Errorf("got %v, want closed channel", b)
 		}
 	})
+}
+
+func TestUnlimitedSize(t *testing.T) {
+	got := collect(batch.New(t.Context(), source(1, 2, 3), math.MaxInt))
+	if want := [][]int{{1, 2, 3}}; !equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestTimeoutWithBusyInput(t *testing.T) {
+	// The input never runs dry while the batcher works through it, and no
+	// batch ever fills up. The timeout must still cut batches: 1ms against
+	// the several milliseconds it takes to receive a million values.
+	const n = 1_000_000
+	in := make(chan int, n)
+	for i := range n {
+		in <- i
+	}
+	close(in)
+
+	batches, total := 0, 0
+	for b := range batch.New(t.Context(), in, math.MaxInt, batch.WithTimeout(time.Millisecond)) {
+		batches++
+		total += len(b)
+	}
+	if total != n {
+		t.Errorf("got %d values, want %d", total, n)
+	}
+	if batches < 2 {
+		t.Errorf("got %d batch, want the timeout to cut several", batches)
+	}
 }
 
 func TestCancelDiscardsUnfinishedBatch(t *testing.T) {

@@ -21,7 +21,7 @@ for rows := range batch.New(ctx, in, 1000, batch.WithTimeout(50*time.Millisecond
 }
 ```
 
-A batch is sent when it is full, when its timeout expires (counted from its first value), or when the input is closed. It is never empty, and the receiver owns the slice. `NewFunc` can also end a batch early, for example when the key changes:
+A batch is sent when it is full, when its timeout expires (counted from its first value), or when the input is closed. It is never empty, and the receiver owns the slice. To batch by time alone, pass `math.MaxInt` as the size. `NewFunc` can also end a batch early, for example when the key changes:
 
 ```go
 byUser := func(prev, next Event) bool { return prev.UserID != next.UserID }
