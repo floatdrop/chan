@@ -1,7 +1,6 @@
-// Package demux routes values received from one channel to many, by key.
+// Package demux splits the values received from one channel by key.
 //
-// [Static] sends each value to one of a fixed set of channels. [Dynamic] starts
-// a consumer for each key it sees and gives it the values with that key, in
-// order. Both run in the caller's goroutine until the input channel is closed
-// or the context is done, and close the channels they send to before returning.
+// [ByKey] starts a consumer for each key it sees and gives it the values with
+// that key, in order. Consumers of different keys run concurrently; values of
+// one key are never processed concurrently.
 package demux

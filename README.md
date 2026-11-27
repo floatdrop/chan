@@ -48,21 +48,10 @@ r.Dropped() // How many values were discarded.
 
 ## [demux](https://pkg.go.dev/github.com/floatdrop/chan/demux)
 
-Fans values out by key, to fixed channels or to a consumer started per key.
-
-`Static` sends each value to one of a fixed set of channels and closes them all when the input ends:
+Fans values out by key: `ByKey` starts a consumer for each key it sees and gives it that key's values in order. It returns once every consumer has returned:
 
 ```go
-err := demux.Static(ctx, in, func(e Event) string { return e.Kind }, map[string]chan<- Event{
-	"click": clicks,
-	"view":  views,
-})
-```
-
-`Dynamic` starts a consumer for each key it sees. Each consumer receives its key's values in order. `Dynamic` returns once every consumer has returned:
-
-```go
-err := demux.Dynamic(ctx, in, func(o Order) string { return o.CustomerID },
+err := demux.ByKey(ctx, in, func(o Order) string { return o.CustomerID },
 	func(customer string, orders <-chan Order) {
 		for o := range orders {
 			process(customer, o) // One customer's orders are processed one at a time.
@@ -94,12 +83,10 @@ BenchmarkNewTimeout/size=16-14        12316239     100.6 ns/op     8 B/op   0 al
 BenchmarkNewTimeout/size=256-14       27033140     43.46 ns/op     8 B/op   0 allocs/op
 BenchmarkNewFunc-14                   15001366     79.33 ns/op     8 B/op   0 allocs/op
 pkg: github.com/floatdrop/chan/demux
-BenchmarkStatic/keys=1-14              8448268     122.1 ns/op     0 B/op   0 allocs/op
-BenchmarkStatic/keys=16-14             7079841     171.4 ns/op     0 B/op   0 allocs/op
-BenchmarkDynamic/keys=1-14             9604647     123.1 ns/op     0 B/op   0 allocs/op
-BenchmarkDynamic/keys=16-14            6578126     183.7 ns/op     0 B/op   0 allocs/op
-BenchmarkDynamic/keys=1024-14          4544674     264.1 ns/op     0 B/op   0 allocs/op
-BenchmarkDynamicChurn-14               1466347     813.6 ns/op   872 B/op   5 allocs/op
+BenchmarkByKey/keys=1-14               8403237     131.1 ns/op     0 B/op   0 allocs/op
+BenchmarkByKey/keys=16-14              5907326     200.6 ns/op     0 B/op   0 allocs/op
+BenchmarkByKey/keys=1024-14            3959383     301.9 ns/op     0 B/op   0 allocs/op
+BenchmarkByKeyChurn-14                 1289388     922.8 ns/op   872 B/op   5 allocs/op
 pkg: github.com/floatdrop/chan/ring
 BenchmarkSend/size=1-14               37045423     32.60 ns/op     0 B/op   0 allocs/op
 BenchmarkSend/size=64-14              32368641     36.65 ns/op     0 B/op   0 allocs/op
@@ -109,7 +96,7 @@ BenchmarkFrom-14                      10233439     116.7 ns/op     0 B/op   0 al
 BenchmarkChan-14                      39370562     30.04 ns/op     0 B/op   0 allocs/op
 ```
 
-Compared with the archived packages on the same machine (median of 6 runs):
+Compared with the archived packages on the same machine (median of 6 runs; the archived `demux.Dynamic` is compared with `ByKey`):
 
 | Benchmark | Before | After | Speedup |
 |---|---:|---:|---:|
@@ -120,17 +107,15 @@ Compared with the archived packages on the same machine (median of 6 runs):
 | `batch/NewTimeout/size=16` | 157 ns | 102 ns | 1.54× |
 | `batch/NewTimeout/size=256` | 95 ns | 43 ns | 2.20× |
 | `batch/NewFunc` | 112 ns | 80 ns | 1.40× (128 → 8 B/op) |
-| `demux/Static/keys=1` | 90 ns | 120 ns | 0.75× |
-| `demux/Static/keys=16` | 153 ns | 171 ns | 0.89× |
-| `demux/Dynamic/keys=1` | 92 ns | 123 ns | 0.75× |
-| `demux/Dynamic/keys=16` | 167 ns | 180 ns | 0.93× |
-| `demux/Dynamic/keys=1024` | 267 ns | 284 ns | 0.94× |
-| `demux/DynamicChurn` | 723 ns | 889 ns | 0.81× (776 → 872 B/op) |
+| `demux/ByKey/keys=1` | 95 ns | 130 ns | 0.73× |
+| `demux/ByKey/keys=16` | 166 ns | 200 ns | 0.83× |
+| `demux/ByKey/keys=1024` | 261 ns | 298 ns | 0.87× |
+| `demux/ByKeyChurn` | 699 ns | 921 ns | 0.76× (776 → 872 B/op) |
 | `ring/From` | 103 ns | 116 ns | 0.89× |
 
-- The old packages could not be canceled. Waiting on a cancelable context costs `demux` and `ring.From` 10–25%. With `context.Background()`, which can never be canceled, they use plain channel operations and run at 0.88–1.04× of the old speed (churn aside).
+- The old packages could not be canceled. Waiting on a cancelable context costs `demux.ByKey` and `ring.From` 11–27%. With `context.Background()`, which can never be canceled, they use plain channel operations and run at 0.88–1.04× of the old speed (churn aside).
 - `batch` with `size=1` is slower because its output channel is now unbuffered by default. `WithBuffer(1)` brings it to about 340 ns.
-- `DynamicChurn` reopens a key for nearly every value. The extra time there is what keeps a reopened key's consumers from running at the same time.
+- `ByKeyChurn` reopens a key for nearly every value. The extra time there is what keeps a reopened key's consumers from running at the same time.
 - `ring.New` with `Send` costs about as much as a plain buffered channel send (`BenchmarkChan`), because it involves no goroutine.
 
 ## License

@@ -51,12 +51,12 @@ func (r *recorder) check(t *testing.T, want map[string][][]int) {
 	}
 }
 
-func TestDynamic(t *testing.T) {
+func TestByKey(t *testing.T) {
 	in := source(msg{"a", 1}, msg{"b", 1}, msg{"a", 2}, msg{"c", 1}, msg{"b", 2}, msg{"a", 3})
 	var rec recorder
 
-	if err := demux.Dynamic(t.Context(), in, msgKey, rec.consume); err != nil {
-		t.Fatalf("Dynamic() = %v, want nil", err)
+	if err := demux.ByKey(t.Context(), in, msgKey, rec.consume); err != nil {
+		t.Fatalf("ByKey() = %v, want nil", err)
 	}
 	rec.check(t, map[string][][]int{
 		"a": {{1, 2, 3}},
@@ -65,22 +65,22 @@ func TestDynamic(t *testing.T) {
 	})
 }
 
-func TestDynamicEmptyInput(t *testing.T) {
+func TestByKeyEmptyInput(t *testing.T) {
 	var rec recorder
-	if err := demux.Dynamic(t.Context(), source[msg](), msgKey, rec.consume); err != nil {
-		t.Fatalf("Dynamic() = %v, want nil", err)
+	if err := demux.ByKey(t.Context(), source[msg](), msgKey, rec.consume); err != nil {
+		t.Fatalf("ByKey() = %v, want nil", err)
 	}
 	rec.check(t, nil)
 }
 
-func TestDynamicMaxKeysClosesLeastRecentlyUsed(t *testing.T) {
+func TestByKeyMaxKeysClosesLeastRecentlyUsed(t *testing.T) {
 	// "a" is used after "b", so "b" is closed when "c" arrives;
 	// then "a" is the least recently used when "b" comes back.
 	in := source(msg{"a", 1}, msg{"b", 1}, msg{"a", 2}, msg{"c", 1}, msg{"b", 2})
 	var rec recorder
 
-	if err := demux.Dynamic(t.Context(), in, msgKey, rec.consume, demux.WithMaxKeys(2)); err != nil {
-		t.Fatalf("Dynamic() = %v, want nil", err)
+	if err := demux.ByKey(t.Context(), in, msgKey, rec.consume, demux.WithMaxKeys(2)); err != nil {
+		t.Fatalf("ByKey() = %v, want nil", err)
 	}
 	rec.check(t, map[string][][]int{
 		"a": {{1, 2}},
@@ -89,7 +89,7 @@ func TestDynamicMaxKeysClosesLeastRecentlyUsed(t *testing.T) {
 	})
 }
 
-func TestDynamicReopenedKeyWaitsForPreviousConsumer(t *testing.T) {
+func TestByKeyReopenedKeyWaitsForPreviousConsumer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var (
 			mu      sync.Mutex
@@ -114,18 +114,18 @@ func TestDynamicReopenedKeyWaitsForPreviousConsumer(t *testing.T) {
 
 		start := time.Now()
 		identity := func(s string) string { return s }
-		err := demux.Dynamic(t.Context(), source("a", "b", "a"), identity, slow, demux.WithMaxKeys(1))
+		err := demux.ByKey(t.Context(), source("a", "b", "a"), identity, slow, demux.WithMaxKeys(1))
 		if err != nil {
-			t.Fatalf("Dynamic() = %v, want nil", err)
+			t.Fatalf("ByKey() = %v, want nil", err)
 		}
 		// The two consumers of "a" ran one after the other.
 		if elapsed := time.Since(start); elapsed != 2*time.Second {
-			t.Errorf("Dynamic returned after %v, want 2s", elapsed)
+			t.Errorf("ByKey returned after %v, want 2s", elapsed)
 		}
 	})
 }
 
-func TestDynamicCancel(t *testing.T) {
+func TestByKeyCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		in := make(chan int)
@@ -137,35 +137,59 @@ func TestDynamicCancel(t *testing.T) {
 		}
 		errc := make(chan error)
 		go func() {
-			errc <- demux.Dynamic(ctx, in, func(v int) int { return v }, stuck)
+			errc <- demux.ByKey(ctx, in, func(v int) int { return v }, stuck)
 		}()
 
 		in <- 1
-		synctest.Wait() // Dynamic is blocked: the consumer does not receive.
+		synctest.Wait() // ByKey is blocked: the consumer does not receive.
 		cancel()
 		synctest.Wait()
 		select {
 		case err := <-errc:
-			t.Fatalf("Dynamic() = %v before its consumer returned", err)
+			t.Fatalf("ByKey() = %v before its consumer returned", err)
 		default:
 		}
 
 		close(release)
 		if err := <-errc; !errors.Is(err, context.Canceled) {
-			t.Errorf("Dynamic() = %v, want %v", err, context.Canceled)
+			t.Errorf("ByKey() = %v, want %v", err, context.Canceled)
 		}
 	})
 }
 
-func TestDynamicWithBuffer(t *testing.T) {
+func TestByKeyConsumerReturnsEarly(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// The consumer of "a" gives up after one value; "b" must still get all of its values.
+		in := source(msg{"a", 1}, msg{"a", 2}, msg{"b", 1}, msg{"a", 3}, msg{"b", 2})
+		var rec recorder
+		consume := func(key string, ch <-chan msg) {
+			if key == "a" {
+				m := <-ch
+				rec.consume(key, source(m))
+				return
+			}
+			rec.consume(key, ch)
+		}
+
+		if err := demux.ByKey(t.Context(), in, msgKey, consume); err != nil {
+			t.Fatalf("ByKey() = %v, want nil", err)
+		}
+		rec.check(t, map[string][][]int{
+			"a": {{1}},
+			"b": {{1, 2}},
+		})
+	})
+}
+
+func TestByKeyWithBuffer(t *testing.T) {
 	var got int
-	err := demux.Dynamic(t.Context(), source(1), func(v int) int { return v }, func(_ int, ch <-chan int) {
+	err := demux.ByKey(t.Context(), source(1), func(v int) int { return v }, func(_ int, ch <-chan int) {
 		got = cap(ch)
 		for range ch {
 		}
 	}, demux.WithBuffer(3))
 	if err != nil {
-		t.Fatalf("Dynamic() = %v, want nil", err)
+		t.Fatalf("ByKey() = %v, want nil", err)
 	}
 	if got != 3 {
 		t.Errorf("cap(ch) = %d, want 3", got)
@@ -187,4 +211,14 @@ func TestOptionPanics(t *testing.T) {
 			f()
 		})
 	}
+}
+
+// source returns a closed channel that holds values.
+func source[T any](values ...T) <-chan T {
+	ch := make(chan T, len(values))
+	for _, v := range values {
+		ch <- v
+	}
+	close(ch)
+	return ch
 }

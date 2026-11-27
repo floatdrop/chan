@@ -7,7 +7,7 @@ import (
 	"github.com/floatdrop/chan/internal/ctxchan"
 )
 
-// Option configures [Dynamic].
+// Option configures [ByKey].
 type Option func(*config)
 
 type config struct {
@@ -15,7 +15,7 @@ type config struct {
 	buffer  int
 }
 
-// WithMaxKeys limits [Dynamic] to n open keys. When a value with a new key
+// WithMaxKeys limits [ByKey] to n open keys. When a value with a new key
 // arrives and n keys are open, the least recently used key is closed: its
 // channel is closed, so its consumer can finish. If that key comes back, a new
 // consumer is started for it.
@@ -37,7 +37,7 @@ func WithBuffer(n int) Option {
 	return func(c *config) { c.buffer = n }
 }
 
-// Dynamic routes values received from in to consumers it starts for each key.
+// ByKey routes values received from in to consumers it starts for each key.
 //
 // The first value with a new key starts a goroutine running consume(key, ch).
 // Channel ch delivers that value and every later value with the same key, in
@@ -45,13 +45,18 @@ func WithBuffer(n int) Option {
 // when a key closed by [WithMaxKeys] comes back, its new consumer starts only
 // after the previous one has returned.
 //
-// Dynamic runs until in is closed or ctx is done. It then closes every channel,
-// waits for every consumer to return, and returns ctx.Err() if ctx ended it, or
-// nil otherwise. Values already buffered in a channel are still delivered.
+// A consumer may return before ch is closed, for example after an error. The
+// values of its key that are left, or still to come, are then discarded until
+// the key is closed, so the other keys keep flowing.
+//
+// ByKey runs in the caller's goroutine until in is closed or ctx is done. It
+// then closes every channel, waits for every consumer to return, and returns
+// ctx.Err() if ctx ended it, or nil otherwise. Values already buffered in a
+// channel are still delivered.
 //
 // Values are sent one at a time, so a consumer that falls behind holds up the
 // others. [WithBuffer] gives each consumer room to absorb short delays.
-func Dynamic[T any, K comparable](ctx context.Context, in <-chan T, key func(T) K, consume func(K, <-chan T), opts ...Option) error {
+func ByKey[T any, K comparable](ctx context.Context, in <-chan T, key func(T) K, consume func(K, <-chan T), opts ...Option) error {
 	var cfg config
 	for _, opt := range opts {
 		opt(&cfg)
@@ -124,6 +129,10 @@ func (d *dispatcher[T, K]) start(r *route[T, K]) {
 			<-prev.done
 		}
 		d.consume(r.key, r.ch)
+		for range r.ch {
+			// consume returned early: discard the key's values, so the
+			// router never blocks on a channel nobody receives from.
+		}
 
 		d.mu.Lock()
 		if d.running[r.key] == r {
