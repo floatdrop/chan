@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/floatdrop/chan)](https://goreportcard.com/report/github.com/floatdrop/chan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Generic channel utilities for Go 1.27+, with no dependencies. They replace [batchan](https://github.com/floatdrop/batchan), [ringchan](https://github.com/floatdrop/ringchan) and [demux](https://github.com/floatdrop/demux).
+Generic channel utilities for Go 1.27+, with no dependencies.
 
 ```bash
 go get github.com/floatdrop/chan@latest
