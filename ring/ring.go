@@ -12,21 +12,35 @@ import (
 	"github.com/floatdrop/chan/internal/ctxchan"
 )
 
+// Receiver is the receiving side of a ring: its values and the count of those
+// it dropped. [From] returns one, and every [Ring] embeds one. The zero value
+// is not usable.
+type Receiver[T any] struct {
+	// C delivers the values in the order they were sent. It is closed when the
+	// ring is closed; values still buffered at that point can be received
+	// before the channel reports that it is closed.
+	C <-chan T
+
+	dropped atomic.Uint64
+}
+
+// Dropped reports how many values were discarded to make room for newer ones.
+func (r *Receiver[T]) Dropped() uint64 {
+	return r.dropped.Load()
+}
+
 // Ring is a buffered channel that keeps the newest values. [Ring.Send] never
 // blocks: when the buffer is full, it discards the oldest value first.
 //
-// Values are received from C in the order they were sent. Like a channel, a
-// Ring may be used by several senders and receivers at once and is closed by a
-// sender: Send and Close panic once the Ring is closed.
+// Values are received from C, which Ring has from its embedded [Receiver].
+// Like a channel, a Ring may be used by several senders and receivers at once
+// and is closed by a sender: Send and Close panic once the Ring is closed.
 //
-// A Ring must be created with [New] or [From]; the zero value is not usable.
+// A Ring must be created with [New]; the zero value is not usable.
 type Ring[T any] struct {
-	// C delivers the values. It is closed by Close; values still buffered at
-	// that point can be received before the channel reports that it is closed.
-	C <-chan T
+	Receiver[T]
 
-	ch      chan T
-	dropped atomic.Uint64
+	ch chan T
 }
 
 // New returns an empty Ring that holds up to size values.
@@ -39,13 +53,13 @@ func New[T any](size int) *Ring[T] {
 	return &Ring[T]{C: ch, ch: ch}
 }
 
-// From returns a Ring of the given size and starts a goroutine that sends
+// From creates a ring of the given size and starts a goroutine that sends
 // every value received from in to it. When in is closed or ctx is done, the
-// goroutine stops reading in and closes the Ring. The Ring belongs to that
-// goroutine: the caller must not call Send or Close.
+// goroutine stops reading in and closes the ring.
 //
+// The ring belongs to that goroutine, so From returns only its receiving side.
 // It panics if size is less than 1.
-func From[T any](ctx context.Context, in <-chan T, size int) *Ring[T] {
+func From[T any](ctx context.Context, in <-chan T, size int) *Receiver[T] {
 	r := New[T](size)
 	go func() {
 		defer r.Close()
@@ -57,11 +71,11 @@ func From[T any](ctx context.Context, in <-chan T, size int) *Ring[T] {
 			r.Send(v)
 		}
 	}()
-	return r
+	return &r.Receiver
 }
 
 // Send adds v to the Ring without blocking. If the Ring is full, Send first
-// discards the oldest value, which [Ring.Dropped] counts.
+// discards the oldest value, which [Receiver.Dropped] counts.
 func (r *Ring[T]) Send(v T) {
 	for {
 		select {
@@ -82,9 +96,4 @@ func (r *Ring[T]) Send(v T) {
 // Close closes C. Values already in the Ring can still be received.
 func (r *Ring[T]) Close() {
 	close(r.ch)
-}
-
-// Dropped reports how many values Send has discarded to make room.
-func (r *Ring[T]) Dropped() uint64 {
-	return r.dropped.Load()
 }

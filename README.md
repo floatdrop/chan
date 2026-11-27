@@ -56,7 +56,7 @@ for m := range r.C { // A slow receiver sees the newest values.
 r.Dropped() // How many values were discarded.
 ```
 
-`ring.From(ctx, in, size)` puts a ring in front of an existing channel.
+`ring.From(ctx, in, size)` puts a ring in front of an existing channel. Its goroutine owns the ring, so `From` returns a `*ring.Receiver` that offers only `C` and `Dropped()`.
 
 ## demux
 
