@@ -36,7 +36,7 @@ func (r *Receiver[T]) Dropped() uint64 {
 // Like a channel, a Ring may be used by several senders and receivers at once
 // and is closed by a sender: Send and Close panic once the Ring is closed.
 //
-// A Ring must be created with [New]; the zero value is not usable.
+// A Ring must be created with [New]: Send panics on the zero value.
 type Ring[T any] struct {
 	Receiver[T]
 
@@ -77,6 +77,10 @@ func From[T any](ctx context.Context, in <-chan T, size int) *Receiver[T] {
 // Send adds v to the Ring without blocking. If the Ring is full, Send first
 // discards the oldest value, which [Receiver.Dropped] counts.
 func (r *Ring[T]) Send(v T) {
+	if r.ch == nil {
+		// Without this check, Send would spin forever on the nil channel.
+		panic("ring: Send on a zero Ring; create it with New")
+	}
 	for {
 		select {
 		case r.ch <- v:

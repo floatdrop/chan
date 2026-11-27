@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/floatdrop/chan/ring"
 )
@@ -110,6 +111,23 @@ func TestFromCancel(t *testing.T) {
 			t.Error("From kept reading after cancel")
 		}
 	})
+}
+
+func TestSendOnZeroRingPanics(t *testing.T) {
+	panicked := make(chan bool)
+	go func() {
+		defer func() { panicked <- recover() != nil }()
+		var r ring.Ring[int]
+		r.Send(1)
+	}()
+	select {
+	case ok := <-panicked:
+		if !ok {
+			t.Error("Send on a zero Ring returned without panicking")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Send on a zero Ring did not return")
+	}
 }
 
 func TestNewPanics(t *testing.T) {
