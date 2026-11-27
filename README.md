@@ -5,28 +5,15 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/floatdrop/chan)](https://goreportcard.com/report/github.com/floatdrop/chan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Generic channel utilities for Go 1.27+, with no dependencies.
-
-| Package | What it does |
-|---|---|
-| [`batch`](https://pkg.go.dev/github.com/floatdrop/chan/batch) | Groups values into slices by size, timeout or a split function. |
-| [`ring`](https://pkg.go.dev/github.com/floatdrop/chan/ring) | A bounded channel that drops the oldest value instead of blocking the sender. |
-| [`demux`](https://pkg.go.dev/github.com/floatdrop/chan/demux) | Fans values out by key, to fixed channels or to a consumer started per key. |
-
-They replace [batchan](https://github.com/floatdrop/batchan), [ringchan](https://github.com/floatdrop/ringchan) and [demux](https://github.com/floatdrop/demux).
+Generic channel utilities for Go 1.27+, with no dependencies. They replace [batchan](https://github.com/floatdrop/batchan), [ringchan](https://github.com/floatdrop/ringchan) and [demux](https://github.com/floatdrop/demux).
 
 ```bash
 go get github.com/floatdrop/chan@latest
 ```
 
-## Conventions
+## [batch](https://pkg.go.dev/github.com/floatdrop/chan/batch)
 
-- **Context first.** Every function that reads a channel or starts a goroutine takes a `context.Context`. Canceling it stops the work, closes the output channels and lets every goroutine exit, even if nobody is receiving anymore.
-- **Closing the input means "done".** Closing the input flushes everything that is pending. Canceling the context abandons it.
-- **The sender closes.** Channels a function returns, or sends to, are closed by that function when it is done.
-- **Invalid sizes panic** when the call is made, as `make` and `slices.Chunk` do.
-
-## batch
+Groups values into slices by size, timeout or a split function.
 
 ```go
 // Insert rows in batches of up to 1000, and never keep a row waiting for more than 50ms.
@@ -44,7 +31,9 @@ for events := range batch.NewFunc(ctx, in, 100, byUser) {
 }
 ```
 
-## ring
+## [ring](https://pkg.go.dev/github.com/floatdrop/chan/ring)
+
+A bounded channel that drops the oldest value instead of blocking the sender.
 
 ```go
 r := ring.New[Metric](128)
@@ -58,7 +47,9 @@ r.Dropped() // How many values were discarded.
 
 `ring.From(ctx, in, size)` puts a ring in front of an existing channel. Its goroutine owns the ring, so `From` returns a `*ring.Receiver` that offers only `C` and `Dropped()`.
 
-## demux
+## [demux](https://pkg.go.dev/github.com/floatdrop/chan/demux)
+
+Fans values out by key, to fixed channels or to a consumer started per key.
 
 `Static` sends each value to one of a fixed set of channels and closes them all when the input ends:
 
